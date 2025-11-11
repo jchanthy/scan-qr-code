@@ -1,11 +1,12 @@
 import React, { useRef, useState, useCallback, DragEvent, ClipboardEvent } from 'react';
 import { UploadIcon, XIcon } from './Icons';
+import { GoogleGenAI, Type } from "@google/genai";
 
 // TypeScript declaration for the jsQR library loaded from a CDN
 declare const jsQR: (data: Uint8ClampedArray, width: number, height: number, options?: { inversionAttempts: 'dontInvert' | 'onlyInvert' | 'both' }) => { data: string } | null;
 
 interface QRCodeInputProps {
-  onScan: (data: string) => void;
+  onScan: (data: string[]) => void;
   onError: (message: string) => void;
   onProcessing: (isProcessing: boolean) => void;
   onImageSelect: (imageSrc: string) => void;
@@ -18,55 +19,182 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
 
-  const processImageFile = useCallback((file: File) => {
+  // Helper: Scan using the native BarcodeDetector API
+  // Returns an array of strings
+  const scanWithNative = async (imageSource: ImageBitmap | HTMLImageElement | HTMLCanvasElement | Blob): Promise<string[]> => {
+    const results: string[] = [];
+    if ('BarcodeDetector' in window) {
+      try {
+        // @ts-ignore: Experimental API
+        const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+        const barcodes = await detector.detect(imageSource);
+        if (barcodes.length > 0) {
+          barcodes.forEach((barcode: any) => {
+             if (barcode.rawValue) results.push(barcode.rawValue);
+          });
+        }
+      } catch (e) {
+        console.warn("Native detection failed or not supported", e);
+      }
+    }
+    return results;
+  };
+
+  // Helper: Scan using jsQR library
+  const scanWithJsQR = (ctx: CanvasRenderingContext2D, width: number, height: number): string | null => {
+    if (typeof jsQR !== 'undefined') {
+      try {
+        const imageData = ctx.getImageData(0, 0, width, height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: 'both',
+        });
+        if (code) {
+          return code.data;
+        }
+      } catch (e) {
+         console.warn("jsQR failed", e);
+      }
+    }
+    return null;
+  };
+
+  const processImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
       onError('Invalid file type. Please upload an image.');
       return;
     }
 
     onProcessing(true);
-    const reader = new FileReader();
 
-    reader.onload = (e) => {
-      const imageUrl = e.target?.result as string;
+    try {
+      // 1. Load the image and get Base64 data
+      const imageUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target?.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
       onImageSelect(imageUrl);
 
-      const image = new Image();
-      image.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = image.width;
-        canvas.height = image.height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          onError('Could not get canvas context.');
-          return;
-        }
-        ctx.drawImage(image, 0, 0, image.width, image.height);
-        const imageData = ctx.getImageData(0, 0, image.width, image.height);
-        
-        if (typeof jsQR === 'undefined') {
-            onError('QR Code scanning library is not loaded.');
-            return;
-        }
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Failed to load image"));
+        img.src = imageUrl;
+      });
 
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'both',
-        });
-        if (code) {
-          onScan(code.data);
-        } else {
-          onError('No QR code found. If the image is blurry or has a large logo, it may be difficult to read.');
-        }
-      };
-      image.onerror = () => {
-        onError('Could not load the image.');
-      };
-      image.src = imageUrl;
-    };
-    reader.onerror = () => {
-        onError('Failed to read the file.');
-    };
-    reader.readAsDataURL(file);
+      const detectedCodes = new Set<string>();
+
+      // --- STAGE 1: Native API (Best for multiple codes) ---
+      const nativeResults = await scanWithNative(image);
+      nativeResults.forEach(code => detectedCodes.add(code));
+
+      // If native found something, it usually finds everything. But we can continue if empty.
+      
+      if (detectedCodes.size === 0) {
+          // --- STAGE 2: jsQR + Tiling (Fallback for older browsers) ---
+          const canvas = document.createElement('canvas');
+          canvas.width = image.width;
+          canvas.height = image.height;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          
+          if (ctx) {
+            ctx.drawImage(image, 0, 0, image.width, image.height);
+            
+            // 2.1 Full Image
+            const jsQrFull = scanWithJsQR(ctx, image.width, image.height);
+            if (jsQrFull) detectedCodes.add(jsQrFull);
+
+            // 2.2 Tiled Scan (to catch small codes if full scan failed)
+            if (detectedCodes.size === 0) {
+                const halfWidth = Math.floor(image.width / 2);
+                const halfHeight = Math.floor(image.height / 2);
+                const quadrants = [
+                    [0, 0, halfWidth, halfHeight],
+                    [halfWidth, 0, halfWidth, halfHeight],
+                    [0, halfHeight, halfWidth, halfHeight],
+                    [halfWidth, halfHeight, halfWidth, halfHeight]
+                ];
+
+                const tileCanvas = document.createElement('canvas');
+                tileCanvas.width = halfWidth;
+                tileCanvas.height = halfHeight;
+                const tileCtx = tileCanvas.getContext('2d', { willReadFrequently: true });
+
+                if (tileCtx) {
+                    for (const [x, y, w, h] of quadrants) {
+                        tileCtx.clearRect(0, 0, w, h);
+                        tileCtx.drawImage(image, x, y, w, h, 0, 0, w, h);
+                        const tileJsQr = scanWithJsQR(tileCtx, w, h);
+                        if (tileJsQr) detectedCodes.add(tileJsQr);
+                    }
+                }
+            }
+          }
+      }
+
+      // Use local results if any
+      if (detectedCodes.size > 0) {
+          onScan(Array.from(detectedCodes));
+          return;
+      }
+
+      // --- STAGE 3: Gemini AI (Advanced fallback) ---
+      // If local detection fails, we use AI.
+      try {
+           const base64Data = imageUrl.split(',')[1];
+           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+           
+           const response = await ai.models.generateContent({
+             model: 'gemini-2.5-flash',
+             contents: {
+               parts: [
+                 {
+                   inlineData: {
+                     mimeType: file.type,
+                     data: base64Data
+                   }
+                 },
+                 {
+                   text: `Analyze this image and detect all visual QR codes.
+                   
+                   Strict Requirements:
+                   1. Return a pure JSON array of strings containing the decoded data for each QR code found (e.g., ["https://example.com", "12345"]).
+                   2. STRICTLY IGNORE any text, URLs, or phone numbers printed on the document background, footer, or header (like Facebook links or addresses). ONLY return data that is encoded inside a QR code pattern.
+                   3. If no QR codes are found, return an empty array [].`
+                 }
+               ]
+             },
+             config: {
+                 responseMimeType: "application/json",
+                 responseSchema: {
+                     type: Type.ARRAY,
+                     items: {
+                         type: Type.STRING
+                     }
+                 }
+             }
+           });
+   
+           const jsonText = response.text.trim();
+           const aiResults = JSON.parse(jsonText) as string[];
+           
+           if (Array.isArray(aiResults) && aiResults.length > 0) {
+             onScan(aiResults);
+             return;
+           }
+
+      } catch (aiError) {
+          console.error("AI Scan failed", aiError);
+      }
+
+      onError('No valid QR codes found in the image.');
+
+    } catch (err) {
+      console.error(err);
+      onError('Failed to process the image.');
+    }
   }, [onScan, onError, onProcessing, onImageSelect]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { ClipboardIcon, CheckIcon, LinkIcon, AlertTriangleIcon } from './Icons';
 
 interface ResultDisplayProps {
-  data: string | null;
+  data: string[] | null;
   error: string | null;
   loading: boolean;
 }
@@ -17,30 +16,55 @@ const isUrl = (text: string): boolean => {
     }
 }
 
+interface SingleResultProps {
+    content: string;
+    index: number;
+}
+
+const SingleResult: React.FC<SingleResultProps> = ({ content, index }) => {
+    const [copied, setCopied] = useState(false);
+    const isDataUrl = isUrl(content);
+
+    useEffect(() => {
+        if (copied) {
+            const timer = setTimeout(() => setCopied(false), 2000);
+            return () => clearTimeout(timer);
+        }
+    }, [copied]);
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(content).then(() => {
+            setCopied(true);
+        });
+    };
+
+    return (
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md overflow-hidden border border-slate-200 dark:border-slate-700 mb-4 last:mb-0">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-700/50 flex justify-between items-center">
+                <h2 className="text-sm font-semibold text-slate-600 dark:text-slate-300">Result #{index + 1}</h2>
+                <button onClick={handleCopy} className="flex items-center space-x-2 px-2 py-1 text-xs font-medium rounded-md bg-white border border-slate-200 hover:bg-slate-50 dark:bg-slate-600 dark:border-slate-500 dark:hover:bg-slate-500 dark:text-slate-200 transition-colors">
+                    {copied ? <CheckIcon className="w-3 h-3 text-green-500"/> : <ClipboardIcon className="w-3 h-3"/>}
+                    <span>{copied ? 'Copied' : 'Copy'}</span>
+                </button>
+            </div>
+            <div className="p-4">
+                <p className="text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap font-mono text-sm">
+                    {content}
+                </p>
+                {isDataUrl && (
+                    <a href={content} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center space-x-2 px-3 py-1.5 text-sm font-semibold rounded-md bg-primary text-white hover:bg-primary-dark transition-colors">
+                        <LinkIcon className="w-4 h-4" />
+                        <span>Open Link</span>
+                    </a>
+                )}
+            </div>
+        </div>
+    )
+}
+
+
 const ResultDisplay: React.FC<ResultDisplayProps> = ({ data, error, loading }) => {
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (copied) {
-      const timer = setTimeout(() => setCopied(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [copied]);
   
-  useEffect(() => {
-    if(data) {
-        setCopied(false);
-    }
-  }, [data]);
-
-  const handleCopy = () => {
-    if (data) {
-      navigator.clipboard.writeText(data).then(() => {
-        setCopied(true);
-      });
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-lg shadow-md min-h-[12rem]">
@@ -69,7 +93,7 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ data, error, loading }) =
     );
   }
 
-  if (!data) {
+  if (!data || data.length === 0) {
     return (
        <div className="flex items-center justify-center p-8 bg-white dark:bg-slate-800 rounded-lg shadow-md text-center min-h-[12rem]">
             <p className="text-slate-500 dark:text-slate-400">Scan a QR code to see the result here.</p>
@@ -77,28 +101,16 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ data, error, loading }) =
     );
   }
 
-  const isDataUrl = isUrl(data);
-
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md min-h-[12rem]">
-        <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Scanned Result</h2>
-            <button onClick={handleCopy} className="flex items-center space-x-2 px-3 py-1.5 text-sm font-medium rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 dark:text-slate-200 transition-colors">
-                {copied ? <CheckIcon className="w-4 h-4 text-green-500"/> : <ClipboardIcon className="w-4 h-4"/>}
-                <span>{copied ? 'Copied!' : 'Copy'}</span>
-            </button>
+    <div className="space-y-4">
+        <div className="flex items-center justify-between">
+             <h3 className="text-lg font-bold text-slate-800 dark:text-white">
+                {data.length} {data.length === 1 ? 'QR Code Found' : 'QR Codes Found'}
+             </h3>
         </div>
-        <div className="p-6">
-            <p className="text-slate-600 dark:text-slate-300 break-all whitespace-pre-wrap font-mono text-sm">
-                {data}
-            </p>
-            {isDataUrl && (
-                <a href={data} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center space-x-2 px-4 py-2 text-sm font-semibold rounded-md bg-primary text-white hover:bg-primary-dark transition-colors">
-                    <LinkIcon className="w-4 h-4" />
-                    <span>Open Link</span>
-                </a>
-            )}
-        </div>
+        {data.map((content, index) => (
+            <SingleResult key={`${index}-${content.substring(0, 10)}`} content={content} index={index} />
+        ))}
     </div>
   );
 };

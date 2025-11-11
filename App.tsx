@@ -19,7 +19,7 @@ const App: React.FC = () => {
     return Theme.LIGHT;
   });
 
-  const [qrData, setQrData] = useState<string | null>(null);
+  const [qrData, setQrData] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -38,7 +38,7 @@ const App: React.FC = () => {
     setTheme((prevTheme) => (prevTheme === Theme.LIGHT ? Theme.DARK : Theme.LIGHT));
   }, []);
 
-  const handleScan = (data: string) => {
+  const handleScan = (data: string[]) => {
     setQrData(data);
     setError(null);
     setIsLoading(false);
@@ -89,7 +89,7 @@ const App: React.FC = () => {
       </main>
       <footer className="text-center py-4 mt-8">
         <p className="text-sm text-slate-500 dark:text-slate-400">
-          QR Code Reader built by John Chanthy, React Developer.
+          QR Code Reader built by John Chanthy, React Engineer.
         </p>
       </footer>
     </div>
