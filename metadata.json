@@ -1,0 +1,5 @@
+{
+  "name": "QR Code Reader",
+  "description": "A simple and beautiful QR code reader. Upload, paste, or browse an image to instantly decode QR codes. Supports light and dark modes.",
+  "requestFramePermissions": []
+}
