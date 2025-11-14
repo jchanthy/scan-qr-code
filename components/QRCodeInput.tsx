@@ -1,5 +1,6 @@
 import React, { useRef, useState, useCallback, DragEvent, ClipboardEvent } from 'react';
-import { UploadIcon, XIcon } from './Icons';
+import { UploadIcon, XIcon, CameraIcon } from './Icons';
+import CameraScanner from './CameraScanner';
 import { GoogleGenAI, Type } from "@google/genai";
 
 // TypeScript declaration for the jsQR library loaded from a CDN
@@ -18,6 +19,7 @@ interface QRCodeInputProps {
 const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing, onImageSelect, onReset, imagePreview, isProcessing }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [isCameraScannerOpen, setCameraScannerOpen] = useState(false);
 
   // Helper: Scan using the native BarcodeDetector API
   // Returns an array of strings
@@ -236,34 +238,65 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
     }
   }, [processImageFile]);
 
+  const handleCameraScan = (data: string, imageDataUrl: string) => {
+    setCameraScannerOpen(false);
+    onImageSelect(imageDataUrl);
+    onScan([data]);
+  };
+  
+  const handleCameraError = (message: string) => {
+    onError(message);
+    setCameraScannerOpen(false);
+  };
+
+  const handleCameraClose = () => {
+    setCameraScannerOpen(false);
+  };
 
   return (
     <div className="bg-white dark:bg-slate-800 rounded-lg shadow-md p-6" onPaste={handlePaste}>
       {!imagePreview ? (
-        <div
-          onDragEnter={handleDrag}
-          onDragLeave={handleDrag}
-          onDragOver={handleDrag}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`relative flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg cursor-pointer transition-colors duration-200 ease-in-out
-            ${dragActive ? 'border-primary bg-primary/10' : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500 bg-slate-50 dark:bg-slate-700/50'}`}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleFileChange}
-          />
-          <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
-            <UploadIcon className="w-10 h-10 mb-3 text-slate-400" />
-            <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">
-              <span className="font-semibold text-primary">Click to upload</span>, drag & drop, or paste
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400">PNG, JPG, GIF, WEBP</p>
-          </div>
-        </div>
+        <>
+            <div
+            onDragEnter={handleDrag}
+            onDragLeave={handleDrag}
+            onDragOver={handleDrag}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`relative flex flex-col items-center justify-center w-full h-52 border-2 border-dashed rounded-lg cursor-pointer transition-colors duration-200 ease-in-out
+                ${dragActive ? 'border-primary bg-primary/10' : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500 bg-slate-50 dark:bg-slate-700/50'}`}
+            >
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+            />
+            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
+                <UploadIcon className="w-10 h-10 mb-3 text-slate-400" />
+                <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">
+                <span className="font-semibold text-primary">Click to upload</span>, drag & drop, or paste
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">PNG, JPG, GIF, WEBP</p>
+            </div>
+            </div>
+            
+            <div className="flex items-center my-4">
+                <div className="flex-grow border-t border-slate-300 dark:border-slate-600"></div>
+                <span className="flex-shrink mx-4 text-slate-400 text-sm">OR</span>
+                <div className="flex-grow border-t border-slate-300 dark:border-slate-600"></div>
+            </div>
+
+            <button
+                onClick={() => setCameraScannerOpen(true)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition-colors"
+                aria-label="Scan QR code with camera"
+                >
+                <CameraIcon className="w-5 h-5" />
+                <span>Scan with Camera</span>
+            </button>
+        </>
       ) : (
          <div className="relative">
             <div className="w-full h-64 flex items-center justify-center bg-slate-100 dark:bg-slate-700 rounded-lg overflow-hidden">
@@ -277,6 +310,14 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
                 <XIcon className="w-5 h-5" />
             </button>
          </div>
+      )}
+
+      {isCameraScannerOpen && (
+        <CameraScanner
+            onScan={handleCameraScan}
+            onError={handleCameraError}
+            onClose={handleCameraClose}
+        />
       )}
     </div>
   );

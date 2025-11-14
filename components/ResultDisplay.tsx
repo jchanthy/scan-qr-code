@@ -8,11 +8,21 @@ interface ResultDisplayProps {
 }
 
 const isUrl = (text: string): boolean => {
+    if (!text || text.includes(' ') || !text.includes('.')) {
+        return false;
+    }
     try {
+        // This works for fully qualified URLs
         new URL(text);
         return true;
     } catch (_) {
-        return false;
+        // This is for URLs without a protocol like 'google.com'
+        try {
+            new URL(`https://${text}`);
+            return true;
+        } catch (e) {
+            return false;
+        }
     }
 }
 
@@ -23,7 +33,7 @@ interface SingleResultProps {
 
 const SingleResult: React.FC<SingleResultProps> = ({ content, index }) => {
     const [copied, setCopied] = useState(false);
-    const isDataUrl = isUrl(content);
+    const isContentUrl = isUrl(content);
 
     useEffect(() => {
         if (copied) {
@@ -36,6 +46,13 @@ const SingleResult: React.FC<SingleResultProps> = ({ content, index }) => {
         navigator.clipboard.writeText(content).then(() => {
             setCopied(true);
         });
+    };
+
+    const getFormattedUrl = (url: string) => {
+        if (!/^(?:f|ht)tps?\:\/\//.test(url)) {
+            return `https://${url}`;
+        }
+        return url;
     };
 
     return (
@@ -51,8 +68,8 @@ const SingleResult: React.FC<SingleResultProps> = ({ content, index }) => {
                 <p className="text-slate-800 dark:text-slate-200 break-all whitespace-pre-wrap font-mono text-sm">
                     {content}
                 </p>
-                {isDataUrl && (
-                    <a href={content} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center space-x-2 px-3 py-1.5 text-sm font-semibold rounded-md bg-primary text-white hover:bg-primary-dark transition-colors">
+                {isContentUrl && (
+                    <a href={getFormattedUrl(content)} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex items-center space-x-2 px-3 py-1.5 text-sm font-semibold rounded-md bg-primary text-white hover:bg-primary-dark transition-colors">
                         <LinkIcon className="w-4 h-4" />
                         <span>Open Link</span>
                     </a>
