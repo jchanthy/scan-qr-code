@@ -3,6 +3,7 @@ import { Theme } from './types';
 import Header from './components/Header';
 import QRCodeInput from './components/QRCodeInput';
 import ResultDisplay from './components/ResultDisplay';
+import HelpModal from './components/HelpModal';
 
 const App: React.FC = () => {
   const [theme, setTheme] = useState<Theme>(() => {
@@ -23,6 +24,7 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [imageSrc, setImageSrc] = useState<string | null>(null);
+  const [isHelpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
     if (theme === Theme.DARK) {
@@ -72,7 +74,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-200 font-sans transition-colors duration-300">
-      <Header theme={theme} toggleTheme={toggleTheme} />
+      <Header theme={theme} toggleTheme={toggleTheme} onHelpClick={() => setHelpOpen(true)} />
       <main className="container mx-auto px-4 py-8 max-w-2xl">
         <div className="space-y-8">
           <QRCodeInput
@@ -92,6 +94,7 @@ const App: React.FC = () => {
           QR Code Reader built by John Chanthy, React Engineer.
         </p>
       </footer>
+      <HelpModal isOpen={isHelpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 };
