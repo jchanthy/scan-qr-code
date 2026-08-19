@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --primary: 210 40% 50%;
+    --primary-light: 210 40% 60%;
+    --primary-dark: 210 40% 40%;
+  }
+}

@@ -1,9 +1,6 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import { XIcon } from './Icons';
-
-// Assuming jsQR is loaded globally from index.html
-declare const jsQR: (data: Uint8ClampedArray, width: number, height: number, options?: { inversionAttempts: 'dontInvert' | 'onlyInvert' | 'both' }) => { data: string } | null;
-
+import jsQR from 'jsqr';
 
 interface CameraScannerProps {
   onScan: (data: string, imageDataUrl: string) => void;

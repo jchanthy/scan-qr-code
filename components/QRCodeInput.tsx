@@ -1,10 +1,7 @@
-import React, { useRef, useState, useCallback, DragEvent, ClipboardEvent } from 'react';
+import React, { useRef, useState, useCallback, useEffect, DragEvent, ClipboardEvent, KeyboardEvent } from 'react';
 import { UploadIcon, XIcon, CameraIcon } from './Icons';
 import CameraScanner from './CameraScanner';
-import { GoogleGenAI, Type } from "@google/genai";
-
-// TypeScript declaration for the jsQR library loaded from a CDN
-declare const jsQR: (data: Uint8ClampedArray, width: number, height: number, options?: { inversionAttempts: 'dontInvert' | 'onlyInvert' | 'both' }) => { data: string } | null;
+import jsQR from 'jsqr';
 
 interface QRCodeInputProps {
   onScan: (data: string[]) => void;
@@ -18,6 +15,7 @@ interface QRCodeInputProps {
 
 const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing, onImageSelect, onReset, imagePreview, isProcessing }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [isCameraScannerOpen, setCameraScannerOpen] = useState(false);
 
@@ -44,18 +42,16 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
 
   // Helper: Scan using jsQR library
   const scanWithJsQR = (ctx: CanvasRenderingContext2D, width: number, height: number): string | null => {
-    if (typeof jsQR !== 'undefined') {
-      try {
-        const imageData = ctx.getImageData(0, 0, width, height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height, {
-          inversionAttempts: 'both',
-        });
-        if (code) {
-          return code.data;
-        }
-      } catch (e) {
-         console.warn("jsQR failed", e);
+    try {
+      const imageData = ctx.getImageData(0, 0, width, height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height, {
+        inversionAttempts: 'both',
+      });
+      if (code) {
+        return code.data;
       }
+    } catch (e) {
+       console.warn("jsQR failed", e);
     }
     return null;
   };
@@ -142,53 +138,31 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
           return;
       }
 
-      // --- STAGE 3: Gemini AI (Advanced fallback) ---
-      // If local detection fails, we use AI.
+      // --- STAGE 3: Server-Side Gemini AI (Secure fallback via /api/generate) ---
       try {
-           const base64Data = imageUrl.split(',')[1];
-           const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-           
-           const response = await ai.models.generateContent({
-             model: 'gemini-2.5-flash',
-             contents: {
-               parts: [
-                 {
-                   inlineData: {
-                     mimeType: file.type,
-                     data: base64Data
-                   }
-                 },
-                 {
-                   text: `Analyze this image and detect all visual QR codes.
-                   
-                   Strict Requirements:
-                   1. Return a pure JSON array of strings containing the decoded data for each QR code found (e.g., ["https://example.com", "12345"]).
-                   2. STRICTLY IGNORE any text, URLs, or phone numbers printed on the document background, footer, or header (like Facebook links or addresses). ONLY return data that is encoded inside a QR code pattern.
-                   3. If no QR codes are found, return an empty array [].`
-                 }
-               ]
-             },
-             config: {
-                 responseMimeType: "application/json",
-                 responseSchema: {
-                     type: Type.ARRAY,
-                     items: {
-                         type: Type.STRING
-                     }
-                 }
-             }
-           });
-   
-           const jsonText = response.text.trim();
-           const aiResults = JSON.parse(jsonText) as string[];
-           
-           if (Array.isArray(aiResults) && aiResults.length > 0) {
-             onScan(aiResults);
-             return;
-           }
+        const response = await fetch('/api/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            image: imageUrl,
+            mimeType: file.type || 'image/png',
+          }),
+        });
 
+        if (response.ok) {
+          const data = await response.json();
+          if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+            onScan(data.results);
+            return;
+          }
+        } else {
+          const errData = await response.json().catch(() => ({}));
+          console.warn("Server AI Scan returned status:", response.status, errData);
+        }
       } catch (aiError) {
-          console.error("AI Scan failed", aiError);
+        console.error("Server AI Scan request failed", aiError);
       }
 
       onError('No valid QR codes found in the image.');
@@ -198,6 +172,74 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
       onError('Failed to process the image.');
     }
   }, [onScan, onError, onProcessing, onImageSelect]);
+
+  // Helper to extract image file from clipboard data
+  const handleClipboardData = useCallback((clipboardData: DataTransfer | null) => {
+    if (!clipboardData) return false;
+
+    // Check files array
+    if (clipboardData.files && clipboardData.files.length > 0) {
+      for (let i = 0; i < clipboardData.files.length; i++) {
+        const file = clipboardData.files[i];
+        if (file.type.startsWith('image/')) {
+          processImageFile(file);
+          return true;
+        }
+      }
+    }
+
+    // Check clipboard items
+    const items = clipboardData.items;
+    if (items && items.length > 0) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1 || items[i].kind === 'file') {
+          const file = items[i].getAsFile();
+          if (file && file.type.startsWith('image/')) {
+            processImageFile(file);
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
+  }, [processImageFile]);
+
+  // Auto focus the upload dropzone on initial mount and when reset
+  useEffect(() => {
+    if (!imagePreview && !isCameraScannerOpen) {
+      // Small timeout ensures DOM is fully ready and focused
+      const timer = setTimeout(() => {
+        dropZoneRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [imagePreview, isCameraScannerOpen]);
+
+  // Global window paste event listener so pasting works instantly anywhere without prior clicks
+  useEffect(() => {
+    const handleGlobalPaste = (e: window.ClipboardEvent) => {
+      // Do not intercept if user is interacting with an input/textarea
+      const activeEl = document.activeElement as HTMLElement | null;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.isContentEditable)) {
+        if (activeEl !== fileInputRef.current) {
+          return;
+        }
+      }
+
+      if (e.clipboardData) {
+        const handled = handleClipboardData(e.clipboardData);
+        if (handled) {
+          e.preventDefault();
+        }
+      }
+    };
+
+    window.addEventListener('paste', handleGlobalPaste);
+    return () => {
+      window.removeEventListener('paste', handleGlobalPaste);
+    };
+  }, [handleClipboardData]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -225,18 +267,18 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
   }, []);
   
   const handlePaste = useCallback((e: ClipboardEvent<HTMLDivElement>) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-            const file = items[i].getAsFile();
-            if(file) {
-               processImageFile(file);
-            }
-            break;
-        }
+    if (handleClipboardData(e.clipboardData)) {
+      e.preventDefault();
+      e.stopPropagation();
     }
-  }, [processImageFile]);
+  }, [handleClipboardData]);
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInputRef.current?.click();
+    }
+  };
 
   const handleCameraScan = (data: string, imageDataUrl: string) => {
     setCameraScannerOpen(false);
@@ -258,13 +300,21 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
       {!imagePreview ? (
         <>
             <div
+            ref={dropZoneRef}
+            tabIndex={0}
+            role="button"
+            aria-label="Upload, drag & drop, or press Ctrl+V to paste an image"
+            onKeyDown={handleKeyDown}
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`relative flex flex-col items-center justify-center w-full h-52 border-2 border-dashed rounded-lg cursor-pointer transition-colors duration-200 ease-in-out
-                ${dragActive ? 'border-primary bg-primary/10' : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500 bg-slate-50 dark:bg-slate-700/50'}`}
+            className={`relative flex flex-col items-center justify-center w-full h-56 border-2 border-dashed rounded-lg cursor-pointer transition-all duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-slate-800 ${
+              dragActive 
+                ? 'border-primary bg-primary/10 scale-[1.01]' 
+                : 'border-slate-300 dark:border-slate-600 hover:border-primary/60 dark:hover:border-primary/60 bg-slate-50 dark:bg-slate-700/50'
+            }`}
             >
             <input
                 ref={fileInputRef}
@@ -273,12 +323,23 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
                 className="hidden"
                 onChange={handleFileChange}
             />
-            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center">
-                <UploadIcon className="w-10 h-10 mb-3 text-slate-400" />
-                <p className="mb-2 text-sm text-slate-500 dark:text-slate-400">
+            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4">
+                <UploadIcon className="w-10 h-10 mb-3 text-primary animate-pulse" />
+                <p className="mb-2 text-sm text-slate-700 dark:text-slate-200">
                 <span className="font-semibold text-primary">Click to upload</span>, drag & drop, or paste
                 </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">PNG, JPG, GIF, WEBP</p>
+                <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  <span>Press</span>
+                  <kbd className="px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 bg-slate-200 dark:bg-slate-600 rounded border border-slate-300 dark:border-slate-500 shadow-sm">
+                    Ctrl + V
+                  </kbd>
+                  <span>or</span>
+                  <kbd className="px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:text-slate-200 bg-slate-200 dark:bg-slate-600 rounded border border-slate-300 dark:border-slate-500 shadow-sm">
+                    ⌘ + V
+                  </kbd>
+                  <span>anywhere</span>
+                </div>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">PNG, JPG, GIF, WEBP</p>
             </div>
             </div>
             
@@ -290,7 +351,7 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
 
             <button
                 onClick={() => setCameraScannerOpen(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition-colors"
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-slate-800"
                 aria-label="Scan QR code with camera"
                 >
                 <CameraIcon className="w-5 h-5" />
@@ -304,7 +365,7 @@ const QRCodeInput: React.FC<QRCodeInputProps> = ({ onScan, onError, onProcessing
             </div>
             <button 
                 onClick={onReset} 
-                className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors"
+                className="absolute top-2 right-2 p-1.5 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors focus:outline-none focus:ring-2 focus:ring-white"
                 aria-label="Clear image"
             >
                 <XIcon className="w-5 h-5" />
