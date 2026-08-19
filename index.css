@@ -1,9 +1,16 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-primary: #3b82f6;
+  --color-primary-light: #60a5fa;
+  --color-primary-dark: #2563eb;
+}
+
 @layer base {
-  :root {
-    --primary: 210 40% 50%;
-    --primary-light: 210 40% 60%;
-    --primary-dark: 210 40% 40%;
+  html {
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
+

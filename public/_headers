@@ -1,0 +1,4 @@
+/*
+  Access-Control-Allow-Origin: https://scan.reandigitalkh.com
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff

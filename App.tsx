@@ -27,12 +27,23 @@ const App: React.FC = () => {
   const [isHelpOpen, setHelpOpen] = useState(false);
 
   useEffect(() => {
+    const root = document.documentElement;
     if (theme === Theme.DARK) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('theme', 'dark');
+      root.classList.add('dark');
+      root.style.colorScheme = 'dark';
+      try {
+        localStorage.setItem('theme', 'dark');
+      } catch (e) {
+        // Handle private browsing or localStorage disabled
+      }
     } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('theme', 'light');
+      root.classList.remove('dark');
+      root.style.colorScheme = 'light';
+      try {
+        localStorage.setItem('theme', 'light');
+      } catch (e) {
+        // Handle private browsing or localStorage disabled
+      }
     }
   }, [theme]);
 

@@ -10,6 +10,13 @@ async function startServer() {
   // JSON Body Parser with adequate payload limit for base64 images
   app.use(express.json({ limit: '25mb' }));
 
+  // Security Headers Middleware
+  app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', 'https://scan.reandigitalkh.com');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    next();
+  });
+
   // API Routes FIRST
 
   // Health check
